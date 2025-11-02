@@ -5,8 +5,8 @@ pipeline {
     environment {
         SERVICE_NAME = "vets-api"   // <- cámbialo en cada repo
         INFRA_REPO   = "https://github.com/calderon7/Infraestructura-Proyecto-Personal.git"
-        INFRA_DIR    = "/var/jenkins_home/workspace/Infraestructura-Proyecto-Personal"  // carpeta donde clonamos infra
-        GIT_CRED     = "github-token" // el ID de la credencial en Jenkins
+        INFRA_DIR    = "/var/jenkins_home/workspace/Infraestructura Proyecto Personal"  // carpeta donde clonamos infra
+        GIT_CRED     = "github-token-v2" // el ID de la credencial en Jenkins
     }
 
     options {
