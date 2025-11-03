@@ -2,17 +2,14 @@ pipeline {
     agent any
 
     environment {
-        // 👇 cámbialo según el micro
-        SERVICE_NAME = "vets-api"
+        SERVICE_NAME       = "vets-api"
+        INFRA_REPO         = "https://github.com/calderon7/Infraestructura-Proyecto-Personal.git"
+        INFRA_DIR          = "/var/jenkins_home/workspace/Infraestructura Proyecto Personal"
+        GIT_CRED           = "github-token-v2"
 
-        // tu repo de infra
-        INFRA_REPO   = "https://github.com/calderon7/Infraestructura-Proyecto-Personal.git"
-
-        // OJO: hay un espacio en el nombre del workspace, lo ponemos entre comillas en los sh
-        INFRA_DIR    = "/var/jenkins_home/workspace/Infraestructura Proyecto Personal"
-
-        // credencial de GitHub
-        GIT_CRED     = "github-token-v2"
+        SONARQUBE_ENV      = "sonarqube-local"
+        SONAR_SCANNER      = "sonar-scanner"
+        SONAR_PROJECT_KEY  = "vets-api"
     }
 
     options {
@@ -33,18 +30,15 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // 1) TESTS/BUILD según el lenguaje
-        // ─────────────────────────────────────────
-
         stage('Tests / Build (auto)') {
             parallel {
-                // --- Node.js ---
+
                 stage('Node.js') {
-                    when { expression { fileExists('package.json') } }
+                    when {
+                        expression { fileExists('package.json') }
+                    }
                     agent {
                         docker {
-                            // 👇 misma versión que usas en tu Dockerfile: node:20-alpine
                             image 'node:20-alpine'
                             args '-v $PWD:/app -w /app'
                         }
@@ -58,9 +52,10 @@ pipeline {
                     }
                 }
 
-                // --- Python ---
                 stage('Python') {
-                    when { expression { fileExists('requirements.txt') || fileExists('pyproject.toml') } }
+                    when {
+                        expression { fileExists('requirements.txt') || fileExists('pyproject.toml') }
+                    }
                     agent {
                         docker {
                             image 'python:3.12-slim'
@@ -77,9 +72,10 @@ pipeline {
                     }
                 }
 
-                // --- Java / Maven (por si luego metes uno) ---
                 stage('Maven/Java') {
-                    when { expression { fileExists('pom.xml') } }
+                    when {
+                        expression { fileExists('pom.xml') }
+                    }
                     agent {
                         docker {
                             image 'maven:3.9-eclipse-temurin-17'
@@ -93,34 +89,20 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // 2) Clonar/actualizar el repo de INFRA (con credenciales)
-        // ─────────────────────────────────────────
         stage('Clonar / actualizar INFRA') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: env.GIT_CRED,
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_TOKEN'
-                    )
-                ]) {
+                withCredentials([usernamePassword(credentialsId: env.GIT_CRED, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
                     sh """
-                    if [ ! -d "${INFRA_DIR}" ]; then
+                      if [ ! -d "${INFRA_DIR}" ]; then
                         git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/calderon7/Infraestructura-Proyecto-Personal.git "${INFRA_DIR}"
-                    else
-                        cd "${INFRA_DIR}"
-                        git pull https://${GIT_USER}:${GIT_TOKEN}@github.com/calderon7/Infraestructura-Proyecto-Personal.git
-                    fi
+                      else
+                        cd "${INFRA_DIR}" && git pull https://${GIT_USER}:${GIT_TOKEN}@github.com/calderon7/Infraestructura-Proyecto-Personal.git
+                      fi
                     """
                 }
             }
         }
 
-
-        // ─────────────────────────────────────────
-        // 3) Copiar este servicio al árbol de services/ del repo de infra
-        // ─────────────────────────────────────────
         stage('Actualizar código del servicio en INFRA') {
             steps {
                 sh """
@@ -131,14 +113,28 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // 4) Deploy con docker compose (desde Jenkins)
-        // ─────────────────────────────────────────
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_ENV}") {
+                    script {
+                        def scannerHome = tool "${SONAR_SCANNER}"
+                        sh """
+                          ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN \
+                            || true
+                        """
+                    }
+                }
+            }
+        }
+
         stage('Build + Deploy con docker compose') {
             steps {
                 sh """
                   cd "${INFRA_DIR}/infra"
-                  # levantamos SOLO este servicio para no tocar Jenkins
                   docker compose up -d --build ${SERVICE_NAME}
                 """
             }
@@ -147,10 +143,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Servicio ${env.SERVICE_NAME} desplegado correctamente"
+            echo "✅ Servicio ${env.SERVICE_NAME} desplegado y analizado"
         }
         failure {
-            echo "❌ Falló el despliegue de ${env.SERVICE_NAME}"
+            echo "❌ Falló el pipeline"
         }
     }
 }
